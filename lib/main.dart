@@ -1,121 +1,120 @@
 import 'package:flutter/material.dart';
+import 'package:table_calendar/table_calendar.dart';
 
 void main() {
-  runApp(const MyApp());
+  // I must ensure Flutter bindings are initialized before running the app.
+  // This is a strict technical requirement for my Local-First SQLite architecture 
+  // to access the device's hard drive and protect user privacy.
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const BalanceApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class BalanceApp extends StatelessWidget {
+  const BalanceApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Balance: Life Management',
+      debugShowCheckedModeBanner: false, // I removed the debug banner to maintain a clean UI for testing.
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        // I implemented this Teal and Green colour palette based on my visual research.
+        // It deliberately reduces visual stress and contrasts with the anxiety-inducing 
+        // reds I observed in competitor apps like Pomofocus.
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          primary: Colors.teal,
+          secondary: Colors.green,
+          surface: const Color(0xFFF5F7FA), // Calming off-white background
+        ),
+        useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const BalanceDashboard(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class BalanceDashboard extends StatefulWidget {
+  const BalanceDashboard({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<BalanceDashboard> createState() => _BalanceDashboardState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+class _BalanceDashboardState extends State<BalanceDashboard> {
+  // These variables manage my calendar state, which I designed specifically 
+  // to support the 'Reflection' stage of the Personal Informatics model.
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Balance Dashboard'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: Column(
+        children: [
+          // The Interactive Table Calendar for the Reflection Stage
+          TableCalendar(
+            firstDay: DateTime.utc(2024, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) {
+              return isSameDay(_selectedDay, day);
+            },
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay; 
+              });
+            },
+            calendarStyle: const CalendarStyle(
+              todayDecoration: BoxDecoration(
+                color: Colors.green, // Calm visual indicator for the current day
+                shape: BoxShape.circle,
+              ),
+              selectedDecoration: BoxDecoration(
+                color: Colors.teal, // Primary focus indicator for user selection
+                shape: BoxShape.circle,
+              ),
             ),
-          ],
-        ),
+            headerStyle: const HeaderStyle(
+              formatButtonVisible: false, // I am hiding extra buttons to prevent UI clutter
+              titleCentered: true,
+            ),
+          ),
+          
+          const Divider(height: 30, thickness: 1),
+
+          // Area reserved for rendering the categorized time blocks (Study, Sleep, Leisure)
+          const Expanded(
+            child: Center(
+              child: Text(
+                'Categorized time blocks will appear here.',
+                style: TextStyle(fontSize: 16, color: Colors.black54),
+              ),
+            ),
+          ),
+        ],
       ),
+      
+      // I designed this Floating Action Button as the trigger for my 'Time Locking' 
+      // feature to introduce friction and force a cognitive pause.
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+        onPressed: () {
+          // TODO: Implement the Time Locking Category Modal (Study, Sleep, Leisure)
+          debugPrint("Time Locking trigger pressed");
+        },
+        backgroundColor: Colors.teal,
+        tooltip: 'Add Categorized Time Block',
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
