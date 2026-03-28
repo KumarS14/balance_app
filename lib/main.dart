@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:fl_chart/fl_chart.dart'; // My imported charting library for data visualization
-import 'database_helper.dart'; 
+import 'package:fl_chart/fl_chart.dart';
+import 'database_helper.dart';
 
-void main() {
-  // I must ensure Flutter bindings are initialized before running the app.
-  // This is a strict technical requirement for my Local-First SQLite architecture.
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await DatabaseHelper.instance.initializeDefaultUser();
   runApp(const BalanceApp());
 }
 
@@ -17,25 +16,14 @@ class BalanceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Balance: Life Management',
-      debugShowCheckedModeBanner: false, // I removed the debug banner to maintain a clean UI.
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // I deliberately implemented this Teal and Green colour palette based on my visual research.
-        // It reduces visual stress and contrasts with the anxiety-inducing reds used in competitor apps.
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.teal,
-          primary: Colors.teal,
-          secondary: Colors.green,
-          surface: const Color(0xFFF5F7FA), 
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, primary: Colors.teal, secondary: Colors.green, surface: const Color(0xFFF5F7FA)),
         useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          backgroundColor: Colors.teal,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
+        appBarTheme: const AppBarTheme(centerTitle: true, backgroundColor: Colors.teal, foregroundColor: Colors.white, elevation: 0),
       ),
-      home: const BalanceDashboard(),
+      // I wrapped the home screen in a DefaultTabController to allow users to switch between graphs
+      home: const DefaultTabController(length: 2, child: BalanceDashboard()),
     );
   }
 }
@@ -48,34 +36,52 @@ class BalanceDashboard extends StatefulWidget {
 }
 
 class _BalanceDashboardState extends State<BalanceDashboard> {
-  // These variables manage my calendar state and graph data for the 'Reflection' stage.
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  Map<String, int> _dailyStats = {'Study': 0, 'Sleep': 0, 'Leisure': 0};
+  
+  Map<String, double> _dailyStats = {'Study': 0, 'Sleep': 0, 'Leisure': 0};
+  Map<String, Map<String, double>> _weeklyStats = {};
 
   @override
   void initState() {
     super.initState();
-    _loadDailyStats(_focusedDay); 
+    _selectedDay = _focusedDay;
+    _loadAllStats(_focusedDay); 
   }
 
-  // I built this method to fetch data from my SQLite database and dynamically update the Pie Chart.
-  Future<void> _loadDailyStats(DateTime date) async {
-    String dateString = date.toIso8601String().split('T')[0];
-    final stats = await DatabaseHelper.instance.getDailyStats(dateString);
+  // I unified the data fetching to pull both daily and weekly stats simultaneously
+  Future<void> _loadAllStats(DateTime activeDate) async {
+    String dateString = activeDate.toIso8601String().split('T')[0];
+    final daily = await DatabaseHelper.instance.getDailyStats(dateString);
+    
+    // Fetching the last 7 days for the Trend graph
+    DateTime weekAgo = activeDate.subtract(const Duration(days: 6));
+    final weekly = await DatabaseHelper.instance.getStatsForDateRange(weekAgo, activeDate);
+
     setState(() {
-      _dailyStats = stats;
+      _dailyStats = daily;
+      _weeklyStats = weekly;
     });
   }
 
-  // I engineered this method to trigger my 'Time Locking' mechanism. 
-  // It forces the user into a cognitive pause, requiring them to validate Rest and Leisure.
-  void _showTimeLockingModal(BuildContext context) {
+  Future<void> _startTimeLockingProcess(BuildContext context) async {
+    final TimeOfDay? startTime = await showTimePicker(context: context, initialTime: TimeOfDay.now(), helpText: 'SELECT START TIME');
+    if (startTime == null || !context.mounted) return;
+
+    final TimeOfDay? endTime = await showTimePicker(context: context, initialTime: startTime, helpText: 'SELECT END TIME');
+    if (endTime == null || !context.mounted) return;
+
+    _showCategoryModal(context, startTime, endTime);
+  }
+
+  String _combineDateAndTime(DateTime date, TimeOfDay time) {
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute).toIso8601String();
+  }
+
+  void _showCategoryModal(BuildContext context, TimeOfDay startTime, TimeOfDay endTime) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (BuildContext context) {
         return Padding(
           padding: const EdgeInsets.all(24.0),
@@ -83,57 +89,23 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Categorize Time Block',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
-                textAlign: TextAlign.center,
-              ),
+              const Text('Categorize Time Block', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text('Allocating: ${startTime.format(context)} - ${endTime.format(context)}', style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 24),
-              
-              // My Categorisation Buttons mapped directly to my local SQLite database
               ElevatedButton.icon(
-                onPressed: () async {
-                  await DatabaseHelper.instance.insertTimeBlock({
-                    'category': 'Study',
-                    'date': _selectedDay?.toIso8601String() ?? DateTime.now().toIso8601String(),
-                    'is_productive': 1,
-                  });
-                  if (context.mounted) Navigator.pop(context); 
-                  _loadDailyStats(_selectedDay ?? DateTime.now()); // Instantly updates my visual graph
-                },
-                icon: const Icon(Icons.menu_book),
-                label: const Text('Study (Deep Work)'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, foregroundColor: Colors.white),
+                onPressed: () async { await _saveBlock('Study', 1, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                icon: const Icon(Icons.menu_book), label: const Text('Study (Deep Work)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, foregroundColor: Colors.white),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: () async {
-                  await DatabaseHelper.instance.insertTimeBlock({
-                    'category': 'Sleep',
-                    'date': _selectedDay?.toIso8601String() ?? DateTime.now().toIso8601String(),
-                    'is_productive': 1, // I validate rest as productive to combat burnout
-                  });
-                  if (context.mounted) Navigator.pop(context);
-                  _loadDailyStats(_selectedDay ?? DateTime.now()); 
-                },
-                icon: const Icon(Icons.bedtime),
-                label: const Text('Sleep (Recovery)'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+                onPressed: () async { await _saveBlock('Sleep', 1, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                icon: const Icon(Icons.bedtime), label: const Text('Sleep (Recovery)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: () async {
-                  await DatabaseHelper.instance.insertTimeBlock({
-                    'category': 'Leisure',
-                    'date': _selectedDay?.toIso8601String() ?? DateTime.now().toIso8601String(),
-                    'is_productive': 0, 
-                  });
-                  if (context.mounted) Navigator.pop(context);
-                  _loadDailyStats(_selectedDay ?? DateTime.now()); 
-                },
-                icon: const Icon(Icons.coffee),
-                label: const Text('Leisure (Unstructured)'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                onPressed: () async { await _saveBlock('Leisure', 0, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                icon: const Icon(Icons.coffee), label: const Text('Leisure (Unstructured)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
               ),
             ],
           ),
@@ -142,79 +114,133 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     );
   }
 
+  Future<void> _saveBlock(String category, int isProductive, TimeOfDay start, TimeOfDay end) async {
+    DateTime activeDate = _selectedDay ?? DateTime.now();
+    await DatabaseHelper.instance.insertTimeBlock({
+      'category': category, 'date': activeDate.toIso8601String().split('T')[0], 
+      'start_time': _combineDateAndTime(activeDate, start), 'end_time': _combineDateAndTime(activeDate, end), 'is_productive': isProductive,
+    });
+    _loadAllStats(activeDate);
+  }
+
+  // Helper method to build the Stacked Bar Chart for the Reflection Suite
+  List<BarChartGroupData> _buildWeeklyBarGroups() {
+    List<BarChartGroupData> groups = [];
+    DateTime activeDate = _selectedDay ?? DateTime.now();
+    
+    for (int i = 0; i < 7; i++) {
+      DateTime day = activeDate.subtract(Duration(days: 6 - i));
+      String dateString = day.toIso8601String().split('T')[0];
+      
+      double sleep = _weeklyStats[dateString]?['Sleep'] ?? 0;
+      double study = _weeklyStats[dateString]?['Study'] ?? 0;
+      double leisure = _weeklyStats[dateString]?['Leisure'] ?? 0;
+      double total = sleep + study + leisure;
+
+      groups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: total == 0 ? 0.1 : total, // Prevents rendering errors on empty days
+              rodStackItems: [
+                BarChartRodStackItem(0, sleep, Colors.indigo), // Sleep at bottom
+                BarChartRodStackItem(sleep, sleep + study, Colors.blueGrey), // Study in middle
+                BarChartRodStackItem(sleep + study, total, Colors.green), // Leisure on top
+              ],
+              width: 20,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+        ),
+      );
+    }
+    return groups;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Balance Dashboard')),
       body: Column(
         children: [
-          // My Interactive Table Calendar
           TableCalendar(
-            firstDay: DateTime.utc(2024, 1, 1),
-            lastDay: DateTime.utc(2030, 12, 31),
-            focusedDay: _focusedDay,
+            firstDay: DateTime.utc(2024, 1, 1), lastDay: DateTime.utc(2030, 12, 31), focusedDay: _focusedDay,
             selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
             onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay; 
-              });
-              _loadDailyStats(selectedDay); // Fetch the clicked day's database records
+              setState(() { _selectedDay = selectedDay; _focusedDay = focusedDay; });
+              _loadAllStats(selectedDay); 
             },
-            calendarStyle: const CalendarStyle(
-              todayDecoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-              selectedDecoration: BoxDecoration(color: Colors.teal, shape: BoxShape.circle),
-            ),
+            calendarStyle: const CalendarStyle(todayDecoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle), selectedDecoration: BoxDecoration(color: Colors.teal, shape: BoxShape.circle)),
             headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
           ),
-          const Divider(height: 30, thickness: 1),
+          
+          // The Tab Bar to switch between Visualisations
+          const TabBar(
+            labelColor: Colors.teal,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: Colors.teal,
+            tabs: [
+              Tab(icon: Icon(Icons.pie_chart), text: "Daily"),
+              Tab(icon: Icon(Icons.bar_chart), text: "7-Day Trend"),
+            ],
+          ),
 
-          // I integrated fl_chart here to visualize the burnout data in a Pie Chart 
-          // to fulfill the 'Reflection' stage of my application.
           Expanded(
-            child: _dailyStats.values.every((element) => element == 0)
-                ? const Center(
-                    child: Text(
-                      'No data for this day. Add a time block!',
-                      style: TextStyle(fontSize: 16, color: Colors.black54),
-                    ),
-                  )
-                : PieChart(
-                    PieChartData(
-                      sectionsSpace: 2,
-                      centerSpaceRadius: 40,
-                      sections: [
-                        PieChartSectionData(
-                          color: Colors.blueGrey,
-                          value: _dailyStats['Study']!.toDouble(),
-                          title: '${_dailyStats['Study']} Study',
-                          radius: 60,
-                          titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+            child: TabBarView(
+              children: [
+                // TAB 1: Daily Pie Chart
+                _dailyStats.values.every((element) => element == 0)
+                    ? const Center(child: Text('No data for this day. Add a time block!', style: TextStyle(fontSize: 16, color: Colors.black54)))
+                    : PieChart(
+                        PieChartData(
+                          sectionsSpace: 2, centerSpaceRadius: 40,
+                          sections: [
+                            if (_dailyStats['Study']! > 0) PieChartSectionData(color: Colors.blueGrey, value: _dailyStats['Study']!, title: '${_dailyStats['Study']!.toStringAsFixed(1)}h', radius: 60, titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                            if (_dailyStats['Sleep']! > 0) PieChartSectionData(color: Colors.indigo, value: _dailyStats['Sleep']!, title: '${_dailyStats['Sleep']!.toStringAsFixed(1)}h', radius: 60, titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                            if (_dailyStats['Leisure']! > 0) PieChartSectionData(color: Colors.green, value: _dailyStats['Leisure']!, title: '${_dailyStats['Leisure']!.toStringAsFixed(1)}h', radius: 60, titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                          ],
                         ),
-                        PieChartSectionData(
-                          color: Colors.indigo,
-                          value: _dailyStats['Sleep']!.toDouble(),
-                          title: '${_dailyStats['Sleep']} Sleep',
-                          radius: 60,
-                          titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      
+                // TAB 2: Weekly Stacked Bar Chart
+                Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: BarChart(
+                    BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: 24, // 24 hours in a day
+                      barTouchData: BarTouchData(enabled: true),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              // Displays the day of the week based on the selected day
+                              DateTime activeDate = _selectedDay ?? DateTime.now();
+                              DateTime day = activeDate.subtract(Duration(days: 6 - value.toInt()));
+                              const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+                              return Padding(padding: const EdgeInsets.only(top: 8.0), child: Text(days[day.weekday - 1], style: const TextStyle(fontSize: 12)));
+                            },
+                          ),
                         ),
-                        PieChartSectionData(
-                          color: Colors.green,
-                          value: _dailyStats['Leisure']!.toDouble(),
-                          title: '${_dailyStats['Leisure']} Leisure',
-                          radius: 60,
-                          titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                      ],
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      gridData: const FlGridData(show: false),
+                      borderData: FlBorderData(show: false),
+                      barGroups: _buildWeeklyBarGroups(),
                     ),
                   ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      
-      // I designed this Floating Action Button to call my Time Locking modal
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showTimeLockingModal(context), 
+        onPressed: () => _startTimeLockingProcess(context), 
         backgroundColor: Colors.teal,
         child: const Icon(Icons.add, color: Colors.white),
       ),
