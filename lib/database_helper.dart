@@ -16,35 +16,69 @@ class DatabaseHelper {
   }
 
   // I used the path_provider package here to solve the technical challenge of cross-platform local storage.
-  // This ensures the SQLite database is saved securely on the user's specific device,
-  // directly fulfilling the 'Privacy-First' requirement of my FYP.
   Future<Database> _initDB(String filePath) async {
     final dbFolder = await getApplicationDocumentsDirectory();
     final path = join(dbFolder.path, filePath);
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    
+    // Version 2 to handle the schema upgrade required by my ERD
+    return await openDatabase(
+      path, 
+      version: 2, 
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
   }
 
   // I created this database schema based exactly on the ERD diagram in my design specification.
   Future _createDB(Database db, int version) async {
     await db.execute('''
+      CREATE TABLE users (
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        ideal_sleep_goal INTEGER NOT NULL,
+        ideal_study_limit INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE time_blocks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT NOT NULL,
         date TEXT NOT NULL,
+        start_time TEXT NOT NULL, 
+        end_time TEXT NOT NULL,
         is_productive INTEGER NOT NULL
       )
     ''');
   }
 
-  // My function to securely save the user's categorized time blocks locally.
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('DROP TABLE IF EXISTS time_blocks');
+      await _createDB(db, newVersion);
+    }
+  }
+
+  // Function to initialize a default user profile (Anxious Alex) for the Heuristic Engine
+  Future<void> initializeDefaultUser() async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM users'));
+    if (count == 0) {
+      await db.insert('users', {
+        'name': 'Student',
+        'ideal_sleep_goal': 8, 
+        'ideal_study_limit': 6, 
+      });
+    }
+  }
+
   Future<int> insertTimeBlock(Map<String, dynamic> row) async {
     final db = await instance.database;
     return await db.insert('time_blocks', row);
   }
 
-  // I wrote this new function to aggregate the saved daily data so I can feed it 
-  // into my fl_chart UI, fulfilling the 'Reflection' stage of the Personal Informatics model.
-  Future<Map<String, int>> getDailyStats(String date) async {
+  // Updated to calculate TOTAL HOURS (double) rather than counting blocks (int)
+  Future<Map<String, double>> getDailyStats(String date) async {
     final db = await instance.database;
     final List<Map<String, dynamic>> maps = await db.query(
       'time_blocks',
@@ -52,31 +86,32 @@ class DatabaseHelper {
       whereArgs: ['$date%'], 
     );
 
-    int studyCount = 0;
-    int sleepCount = 0;
-    int leisureCount = 0;
+    double studyHours = 0;
+    double sleepHours = 0;
+    double leisureHours = 0;
 
     for (var row in maps) {
-      if (row['category'] == 'Study') studyCount++;
-      if (row['category'] == 'Sleep') sleepCount++;
-      if (row['category'] == 'Leisure') leisureCount++;
+      DateTime start = DateTime.parse(row['start_time']);
+      DateTime end = DateTime.parse(row['end_time']);
+      double durationInHours = end.difference(start).inMinutes / 60.0;
+
+      if (row['category'] == 'Study') studyHours += durationInHours;
+      if (row['category'] == 'Sleep') sleepHours += durationInHours;
+      if (row['category'] == 'Leisure') leisureHours += durationInHours;
     }
 
-    return {'Study': studyCount, 'Sleep': sleepCount, 'Leisure': leisureCount};
+    return {'Study': studyHours, 'Sleep': sleepHours, 'Leisure': leisureHours};
   }
-  // I engineered this function to pull historical data over a specific time range.
-  // This powers the 'Trend Analysis' part of my Visualisation Suite, allowing users
-  // to compare their burnout metrics over weeks or months.
+
+  // New function to pull historical data over a specific time range for the Trend Graph
   Future<Map<String, Map<String, double>>> getStatsForDateRange(DateTime startDate, DateTime endDate) async {
     final db = await instance.database;
     final List<Map<String, dynamic>> maps = await db.query(
       'time_blocks',
       where: 'date >= ? AND date <= ?',
-      // Formatting dates to match my SQLite storage standard (YYYY-MM-DD)
       whereArgs: [startDate.toIso8601String().split('T')[0], endDate.toIso8601String().split('T')[0]], 
     );
 
-    // Initializing an empty map to hold the aggregated data for each day
     Map<String, Map<String, double>> rangeStats = {};
 
     for (var row in maps) {
@@ -87,8 +122,6 @@ class DatabaseHelper {
 
       DateTime start = DateTime.parse(row['start_time']);
       DateTime end = DateTime.parse(row['end_time']);
-      
-      // Accurately calculating hours spent to reflect realistic time management
       double duration = end.difference(start).inMinutes / 60.0;
 
       if (row['category'] == 'Study') rangeStats[date]!['Study'] = rangeStats[date]!['Study']! + duration;
