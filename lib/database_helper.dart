@@ -64,4 +64,38 @@ class DatabaseHelper {
 
     return {'Study': studyCount, 'Sleep': sleepCount, 'Leisure': leisureCount};
   }
+  // I engineered this function to pull historical data over a specific time range.
+  // This powers the 'Trend Analysis' part of my Visualisation Suite, allowing users
+  // to compare their burnout metrics over weeks or months.
+  Future<Map<String, Map<String, double>>> getStatsForDateRange(DateTime startDate, DateTime endDate) async {
+    final db = await instance.database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'time_blocks',
+      where: 'date >= ? AND date <= ?',
+      // Formatting dates to match my SQLite storage standard (YYYY-MM-DD)
+      whereArgs: [startDate.toIso8601String().split('T')[0], endDate.toIso8601String().split('T')[0]], 
+    );
+
+    // Initializing an empty map to hold the aggregated data for each day
+    Map<String, Map<String, double>> rangeStats = {};
+
+    for (var row in maps) {
+      String date = row['date'];
+      if (!rangeStats.containsKey(date)) {
+        rangeStats[date] = {'Study': 0, 'Sleep': 0, 'Leisure': 0};
+      }
+
+      DateTime start = DateTime.parse(row['start_time']);
+      DateTime end = DateTime.parse(row['end_time']);
+      
+      // Accurately calculating hours spent to reflect realistic time management
+      double duration = end.difference(start).inMinutes / 60.0;
+
+      if (row['category'] == 'Study') rangeStats[date]!['Study'] = rangeStats[date]!['Study']! + duration;
+      if (row['category'] == 'Sleep') rangeStats[date]!['Sleep'] = rangeStats[date]!['Sleep']! + duration;
+      if (row['category'] == 'Leisure') rangeStats[date]!['Leisure'] = rangeStats[date]!['Leisure']! + duration;
+    }
+
+    return rangeStats;
+  }
 }
