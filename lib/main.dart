@@ -3,7 +3,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:fl_chart/fl_chart.dart'; // My chosen package for the Visualisation Suite
 import 'dart:math'; // I need this to dynamically calculate the chart width for the 1-year view
 import 'database_helper.dart';
-
+import 'heuristic_engine.dart';
 void main() async {
   // I must ensure Flutter bindings are initialized before running my app due to my strictly Local-First SQLite architecture.
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,7 +51,8 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
   // My state variables to store the precise hour calculations for the Reflection stage.
   Map<String, double> _dailyStats = {'Study': 0, 'Sleep': 0, 'Leisure': 0};
   Map<String, Map<String, double>> _trendStats = {};
-  
+  List<String> _currentNudges = [];
+
   // I added this state variable to track the user's selected timeframe for longitudinal analysis.
   int _selectedTrendDays = 7;
 
@@ -72,9 +73,12 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     DateTime pastDate = activeDate.subtract(Duration(days: _selectedTrendDays - 1));
     final trendData = await DatabaseHelper.instance.getStatsForDateRange(pastDate, activeDate);
 
+    final nudges = await HeuristicEngine.generateDailyNudges(activeDate);
+
     setState(() {
       _dailyStats = daily;
       _trendStats = trendData;
+      _currentNudges = nudges;
     });
   }
 
@@ -229,7 +233,30 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
             calendarStyle: const CalendarStyle(todayDecoration: BoxDecoration(color: Colors.green, shape: BoxShape.circle), selectedDecoration: BoxDecoration(color: Colors.teal, shape: BoxShape.circle)),
             headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
           ),
-          
+          // THE HEURISTIC FEEDBACK DISPLAY
+          if (_currentNudges.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.teal.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: _currentNudges.map((nudge) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4.0),
+                    child: Text(
+                      nudge,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.teal),
+                    ),
+                  )).toList(),
+                ),
+              ),
+            ),
           // I implemented a Tab Bar to seamlessly switch between my Data Visualisations
           const TabBar(
             labelColor: Colors.teal,
