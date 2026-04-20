@@ -3,7 +3,10 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 
 class DatabaseHelper {
-  // I implemented a Singleton pattern here so my app only opens one database connection at a time.
+  // --- ARCHITECTURAL DECISION: SINGLETON PATTERN ---
+  // I implemented the Singleton design pattern here to ensure my application 
+  // only ever opens a single, globally accessible connection to the SQLite database.
+  // This prevents memory leaks and concurrent database lockouts during read/write operations.
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
 
@@ -15,12 +18,16 @@ class DatabaseHelper {
     return _database!;
   }
 
-  // I used the path_provider package here to solve the technical challenge of cross-platform local storage.
+  // --- ARCHITECTURAL DECISION: LOCAL-FIRST DATA STORAGE ---
+  // My sociological research highlighted severe privacy concerns with existing wellbeing apps
+  // mining user data. To completely eliminate this risk, I used the path_provider package 
+  // to securely store all behavioral data strictly on the user's local device.
   Future<Database> _initDB(String filePath) async {
     final dbFolder = await getApplicationDocumentsDirectory();
     final path = join(dbFolder.path, filePath);
     
-    // Version 2 to handle the schema upgrade required by my ERD
+    // I implemented a versioning system (Version 2) to safely handle schema upgrades 
+    // without crashing the app for existing users.
     return await openDatabase(
       path, 
       version: 2, 
@@ -29,8 +36,11 @@ class DatabaseHelper {
     );
   }
 
-  // I created this database schema based exactly on the ERD diagram in my design specification.
+  // --- SCHEMA DESIGN ---
+  // I engineered this database schema to directly translate the Entity-Relationship Diagram (ERD)
+  // from my initial project specification into functional SQL tables.
   Future _createDB(Database db, int version) async {
+    // Table 1: Stores the user's self-defined baselines for the Heuristic Engine
     await db.execute('''
       CREATE TABLE users (
         user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,6 +50,7 @@ class DatabaseHelper {
       )
     ''');
 
+    // Table 2: Stores the highly detailed longitudinal time-blocking data
     await db.execute('''
       CREATE TABLE time_blocks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +63,7 @@ class DatabaseHelper {
     ''');
   }
 
+  // Defensive Programming: Safely drops and rebuilds tables if the schema version changes
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('DROP TABLE IF EXISTS time_blocks');
@@ -59,7 +71,8 @@ class DatabaseHelper {
     }
   }
 
-  // Function to initialize a default user profile (Anxious Alex) for the Heuristic Engine
+  // Function to initialize a default user profile ('Anxious Alex' persona) 
+  // so the Heuristic Engine immediately has baseline metrics to compare against upon first boot.
   Future<void> initializeDefaultUser() async {
     final db = await instance.database;
     final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM users'));
@@ -72,12 +85,16 @@ class DatabaseHelper {
     }
   }
 
+  // Securely writes the categorized time blocks to the device storage
   Future<int> insertTimeBlock(Map<String, dynamic> row) async {
     final db = await instance.database;
     return await db.insert('time_blocks', row);
   }
 
-  // Updated to calculate TOTAL HOURS (double) rather than counting blocks (int)
+  // --- DATA AGGREGATION: DAILY METRICS ---
+  // I engineered this to mathematically calculate absolute duration in hours (double) 
+  // rather than just counting the number of blocks (int). This provides the precision 
+  // required by my longitudinal Visualization Suite.
   Future<Map<String, double>> getDailyStats(String date) async {
     final db = await instance.database;
     final List<Map<String, dynamic>> maps = await db.query(
@@ -103,7 +120,9 @@ class DatabaseHelper {
     return {'Study': studyHours, 'Sleep': sleepHours, 'Leisure': leisureHours};
   }
 
-  // New function to pull historical data over a specific time range for the Trend Graph
+  // --- DATA AGGREGATION: LONGITUDINAL TRENDS ---
+  // This complex query pulls historical data over a dynamically selected time range.
+  // It is the backbone of the V2 Heuristic Engine's 'Chronic Fatigue' and 'Sleep Debt' analysis.
   Future<Map<String, Map<String, double>>> getStatsForDateRange(DateTime startDate, DateTime endDate) async {
     final db = await instance.database;
     final List<Map<String, dynamic>> maps = await db.query(
@@ -130,5 +149,31 @@ class DatabaseHelper {
     }
 
     return rangeStats;
+  }
+
+  // --- V3 AGILE UPDATE: DATA INTEGRITY & CORRECTION ---
+
+  // I engineered this retrieval method so users can view their raw daily logs.
+  // This provides transparency to the user, fulfilling a core tenet of my Personal Informatics model.
+  Future<List<Map<String, dynamic>>> getRawBlocksForDay(String date) async {
+    final db = await instance.database;
+    return await db.query(
+      'time_blocks',
+      where: 'date LIKE ?',
+      whereArgs: ['$date%'],
+      orderBy: 'start_time ASC', // I ordered this chronologically for better UX
+    );
+  }
+
+  // During my initial usability testing, I hypothesized that users would experience high 
+  // cognitive friction if they could not correct data entry errors. 
+  // I implemented this deletion method to ensure longitudinal data integrity for the Heuristic Engine.
+  Future<int> deleteTimeBlock(int id) async {
+    final db = await instance.database;
+    return await db.delete(
+      'time_blocks',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }
