@@ -20,8 +20,6 @@ class BalanceApp extends StatelessWidget {
       title: 'Balance: Life Management',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // UI/UX PSYCHOLOGY: I deliberately selected a Teal and Green colour palette to reduce cognitive 
-        // visual stress, contrasting sharply with the anxiety-inducing reds prevalent in competitor apps.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, primary: Colors.teal, secondary: Colors.green, surface: const Color(0xFFF5F7FA)),
         useMaterial3: true,
         appBarTheme: const AppBarTheme(centerTitle: true, backgroundColor: Colors.teal, foregroundColor: Colors.white, elevation: 0),
@@ -69,33 +67,70 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     });
   }
 
-  // --- THE COLLECTION STAGE: ACTIVE TIME LOCKING ---
+  // --- FORMATIVE EVALUATION UPDATE: SETTINGS MODAL ---
+  // Empowers the user to define their own metrics, solving Participant 3's request for flexibility.
+  Future<void> _showSettingsModal(BuildContext context) async {
+    final baselines = await DatabaseHelper.instance.getUserBaselines();
+    int tempSleep = baselines['ideal_sleep_goal'];
+    int tempStudy = baselines['ideal_study_limit'];
+
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Personalise Baselines', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
+                  const SizedBox(height: 16),
+                  Text('Ideal Sleep Goal: $tempSleep hours', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Slider(
+                    value: tempSleep.toDouble(), min: 4, max: 12, divisions: 8, label: '$tempSleep', activeColor: Colors.indigo,
+                    onChanged: (val) => setModalState(() => tempSleep = val.round()),
+                  ),
+                  Text('Burnout Study Limit: $tempStudy hours', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Slider(
+                    value: tempStudy.toDouble(), min: 2, max: 14, divisions: 12, label: '$tempStudy', activeColor: Colors.blueGrey,
+                    onChanged: (val) => setModalState(() => tempStudy = val.round()),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () async {
+                      await DatabaseHelper.instance.updateUserBaselines(tempSleep, tempStudy);
+                      _loadAllStats(_selectedDay ?? DateTime.now()); // Recalculate heuristics instantly
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                    child: const Text('Save Personal Baselines'),
+                  )
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _startTimeLockingProcess(BuildContext context) async {
     final TimeOfDay? startTime = await showTimePicker(
-      context: context, 
-      initialTime: TimeOfDay.now(), 
-      helpText: 'SELECT START TIME (24-Hour)',
-      // FORMATIVE EVALUATION UPDATE: Observation of Participant 1 revealed severe cognitive friction 
-      // with the native AM/PM toggle, leading to database validation errors. I engineered this builder 
-      // to force a 24-hour military time format, adhering strictly to Nielsen's 'Error Prevention' heuristic.
+      context: context, initialTime: TimeOfDay.now(), helpText: 'SELECT START TIME (24-Hour)',
       builder: (BuildContext context, Widget? child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-          child: child!,
-        );
+        return MediaQuery(data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true), child: child!);
       },
     );
     if (startTime == null || !context.mounted) return;
 
     final TimeOfDay? endTime = await showTimePicker(
-      context: context, 
-      initialTime: startTime, 
-      helpText: 'SELECT END TIME (24-Hour)',
+      context: context, initialTime: startTime, helpText: 'SELECT END TIME (24-Hour)',
       builder: (BuildContext context, Widget? child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-          child: child!,
-        );
+        return MediaQuery(data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true), child: child!);
       },
     );
     if (endTime == null || !context.mounted) return;
@@ -103,21 +138,22 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     final int startMinutes = startTime.hour * 60 + startTime.minute;
     final int endMinutes = endTime.hour * 60 + endTime.minute;
 
+    // --- FORMATIVE EVALUATION UPDATE: OVERNIGHT SLEEP BUG FIX ---
+    // Participant 3 flagged an error when logging sleep past midnight. This chronological 
+    // override allows the engine to accurately allocate end times to the following calendar day.
+    bool isOvernight = false;
     if (endMinutes <= startMinutes) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid Time: End time must be after start time!'), backgroundColor: Colors.redAccent),
-      );
-      return; 
+      isOvernight = true; 
     }
 
-    _showCategoryModal(context, startTime, endTime);
+    _showCategoryModal(context, startTime, endTime, isOvernight);
   }
 
   String _combineDateAndTime(DateTime date, TimeOfDay time) {
     return DateTime(date.year, date.month, date.day, time.hour, time.minute).toIso8601String();
   }
 
-  void _showCategoryModal(BuildContext context, TimeOfDay startTime, TimeOfDay endTime) {
+  void _showCategoryModal(BuildContext context, TimeOfDay startTime, TimeOfDay endTime, bool isOvernight) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -130,21 +166,21 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
             children: [
               const Text('Categorize Time Block', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text('Allocating: ${startTime.format(context)} - ${endTime.format(context)}', style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              Text('Allocating: ${startTime.format(context)} - ${endTime.format(context)} ${isOvernight ? "(Next Day)" : ""}', style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 24),
               
               ElevatedButton.icon(
-                onPressed: () async { await _saveBlock('Study', 1, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                onPressed: () async { await _saveBlock('Study', 1, startTime, endTime, isOvernight); if (context.mounted) Navigator.pop(context); },
                 icon: const Icon(Icons.menu_book), label: const Text('Study (Deep Work)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, foregroundColor: Colors.white),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: () async { await _saveBlock('Sleep', 1, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                onPressed: () async { await _saveBlock('Sleep', 1, startTime, endTime, isOvernight); if (context.mounted) Navigator.pop(context); },
                 icon: const Icon(Icons.bedtime), label: const Text('Sleep (Recovery)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: () async { await _saveBlock('Leisure', 0, startTime, endTime); if (context.mounted) Navigator.pop(context); },
+                onPressed: () async { await _saveBlock('Leisure', 0, startTime, endTime, isOvernight); if (context.mounted) Navigator.pop(context); },
                 icon: const Icon(Icons.coffee), label: const Text('Leisure (Unstructured)'), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
               ),
             ],
@@ -154,15 +190,15 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     );
   }
 
-  Future<void> _saveBlock(String category, int isProductive, TimeOfDay start, TimeOfDay end) async {
+  Future<void> _saveBlock(String category, int isProductive, TimeOfDay start, TimeOfDay end, bool isOvernight) async {
     DateTime activeDate = _selectedDay ?? DateTime.now();
+    DateTime endDate = isOvernight ? activeDate.add(const Duration(days: 1)) : activeDate;
+
     await DatabaseHelper.instance.insertTimeBlock({
       'category': category, 'date': activeDate.toIso8601String().split('T')[0], 
-      'start_time': _combineDateAndTime(activeDate, start), 'end_time': _combineDateAndTime(activeDate, end), 'is_productive': isProductive,
+      'start_time': _combineDateAndTime(activeDate, start), 'end_time': _combineDateAndTime(endDate, end), 'is_productive': isProductive,
     });
     
-    // FORMATIVE EVALUATION UPDATE: I introduced this Snackbar to satisfy Nielsen's 'Visibility of System Status' heuristic, 
-    // resolving hesitation observed during user testing when blocks were saved.
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('✅ $category block securely saved!'), backgroundColor: Colors.teal, duration: const Duration(seconds: 2)),
@@ -229,8 +265,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     );
   }
 
-  // --- FORMATIVE EVALUATION UPDATE: VISUAL CONTEXT HELPER ---
-  // I engineered this UI component following Participant 2's inability to parse the raw graph data.
   Widget _buildLegendItem(Color color, String text) {
     return Row(
       children: [
@@ -278,7 +312,13 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Balance Dashboard')),
+      appBar: AppBar(
+        title: const Text('Balance Dashboard'),
+        // FORMATIVE EVALUATION UPDATE: Added Settings entry point
+        actions: [
+          IconButton(icon: const Icon(Icons.settings), tooltip: 'Personalise Baselines', onPressed: () => _showSettingsModal(context)),
+        ],
+      ),
       body: Column(
         children: [
           TableCalendar(
@@ -329,8 +369,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
                         PieChartData(
                           sectionsSpace: 2, centerSpaceRadius: 40,
                           sections: [
-                            // FORMATIVE EVALUATION UPDATE: I modified these labels to explicitly state the category name alongside the value, 
-                            // resolving Participant 1's 'Recall over Recognition' cognitive load issue.
                             if (_dailyStats['Study']! > 0) PieChartSectionData(color: Colors.blueGrey, value: _dailyStats['Study']!, title: 'Study\n${_dailyStats['Study']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                             if (_dailyStats['Sleep']! > 0) PieChartSectionData(color: Colors.indigo, value: _dailyStats['Sleep']!, title: 'Sleep\n${_dailyStats['Sleep']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                             if (_dailyStats['Leisure']! > 0) PieChartSectionData(color: Colors.green, value: _dailyStats['Leisure']!, title: 'Leisure\n${_dailyStats['Leisure']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
@@ -364,7 +402,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
                         ],
                       ),
                     ),
-                    // FORMATIVE EVALUATION UPDATE: Implemented to solve Participant 2's data parsing friction.
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12.0),
                       child: Row(
@@ -385,10 +422,20 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
                             width: max(MediaQuery.of(context).size.width - 32, _selectedTrendDays * 30.0),
                             child: BarChart(
                               BarChartData(
-                                alignment: BarChartAlignment.spaceAround, maxY: 24, barTouchData: BarTouchData(enabled: true),
+                                alignment: BarChartAlignment.spaceAround, maxY: 24, 
+                                // --- FORMATIVE EVALUATION UPDATE: INTERACTIVE TOOLTIPS ---
+                                // Fulfills Nielsen's 'Flexibility and Efficiency of Use' heuristic.
+                                barTouchData: BarTouchData(
+                                  enabled: true,
+                                  touchTooltipData: BarTouchTooltipData(
+                                    getTooltipColor: (group) => Colors.teal.shade900,
+                                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                                      return BarTooltipItem('${rod.toY.toStringAsFixed(1)} Hours', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
+                                    },
+                                  ),
+                                ),
                                 titlesData: FlTitlesData(
                                   show: true,
-                                  // FORMATIVE EVALUATION UPDATE: Direct response to Participant 2 requesting explicit Y-Axis identification.
                                   leftTitles: AxisTitles(
                                     axisNameWidget: const Padding(padding: EdgeInsets.only(bottom: 4.0), child: Text('Hours', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold))),
                                     axisNameSize: 20,
