@@ -67,8 +67,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     });
   }
 
-  // --- FORMATIVE EVALUATION UPDATE: SETTINGS MODAL ---
-  // Empowers the user to define their own metrics, solving Participant 3's request for flexibility.
   Future<void> _showSettingsModal(BuildContext context) async {
     final baselines = await DatabaseHelper.instance.getUserBaselines();
     int tempSleep = baselines['ideal_sleep_goal'];
@@ -78,32 +76,34 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true, 
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
             return Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.fromLTRB(24.0, 24.0, 24.0, 48.0),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min, 
                 children: [
                   const Text('Personalise Baselines', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24),
                   Text('Ideal Sleep Goal: $tempSleep hours', style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
                     value: tempSleep.toDouble(), min: 4, max: 12, divisions: 8, label: '$tempSleep', activeColor: Colors.indigo,
                     onChanged: (val) => setModalState(() => tempSleep = val.round()),
                   ),
+                  const SizedBox(height: 12),
                   Text('Burnout Study Limit: $tempStudy hours', style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
                     value: tempStudy.toDouble(), min: 2, max: 14, divisions: 12, label: '$tempStudy', activeColor: Colors.blueGrey,
                     onChanged: (val) => setModalState(() => tempStudy = val.round()),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24), 
                   ElevatedButton(
                     onPressed: () async {
                       await DatabaseHelper.instance.updateUserBaselines(tempSleep, tempStudy);
-                      _loadAllStats(_selectedDay ?? DateTime.now()); // Recalculate heuristics instantly
+                      _loadAllStats(_selectedDay ?? DateTime.now()); 
                       if (context.mounted) Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
@@ -138,9 +138,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     final int startMinutes = startTime.hour * 60 + startTime.minute;
     final int endMinutes = endTime.hour * 60 + endTime.minute;
 
-    // --- FORMATIVE EVALUATION UPDATE: OVERNIGHT SLEEP BUG FIX ---
-    // Participant 3 flagged an error when logging sleep past midnight. This chronological 
-    // override allows the engine to accurately allocate end times to the following calendar day.
     bool isOvernight = false;
     if (endMinutes <= startMinutes) {
       isOvernight = true; 
@@ -216,12 +213,13 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true, 
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (BuildContext context) {
-        return Padding(
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.6,
           padding: const EdgeInsets.all(16.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Daily Log Audit', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
               const SizedBox(height: 16),
@@ -288,17 +286,34 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
       double leisure = _trendStats[dateString]?['Leisure'] ?? 0;
       double total = sleep + study + leisure;
 
+      List<BarChartRodStackItem> stackItems = [];
+      double currentY = 0;
+      
+      if (sleep > 0) {
+        stackItems.add(BarChartRodStackItem(currentY, currentY + sleep, Colors.indigo));
+        currentY += sleep;
+      }
+      if (study > 0) {
+        stackItems.add(BarChartRodStackItem(currentY, currentY + study, Colors.blueGrey));
+        currentY += study;
+      }
+      if (leisure > 0) {
+        stackItems.add(BarChartRodStackItem(currentY, currentY + leisure, Colors.green));
+      }
+
+      // NaN protection
+      if (total == 0) {
+        stackItems.add(BarChartRodStackItem(0, 0.1, Colors.transparent));
+      }
+
       groups.add(
         BarChartGroupData(
           x: i,
           barRods: [
             BarChartRodData(
-              toY: total == 0 ? 0.1 : total, 
-              rodStackItems: [
-                BarChartRodStackItem(0, sleep, Colors.indigo), 
-                BarChartRodStackItem(sleep, sleep + study, Colors.blueGrey), 
-                BarChartRodStackItem(sleep + study, total, Colors.green), 
-              ],
+              toY: total > 0 ? total : 0.1, 
+              color: total > 0 ? null : Colors.transparent,
+              rodStackItems: stackItems, 
               width: 16, 
               borderRadius: BorderRadius.circular(4),
             ),
@@ -314,7 +329,6 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Balance Dashboard'),
-        // FORMATIVE EVALUATION UPDATE: Added Settings entry point
         actions: [
           IconButton(icon: const Icon(Icons.settings), tooltip: 'Personalise Baselines', onPressed: () => _showSettingsModal(context)),
         ],
@@ -363,19 +377,27 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
           Expanded(
             child: TabBarView(
               children: [
+                // TAB 1: PIE CHART
                 _dailyStats.values.every((element) => element == 0)
                     ? const Center(child: Text('No data for this day.', style: TextStyle(color: Colors.black54)))
-                    : PieChart(
-                        PieChartData(
-                          sectionsSpace: 2, centerSpaceRadius: 40,
-                          sections: [
-                            if (_dailyStats['Study']! > 0) PieChartSectionData(color: Colors.blueGrey, value: _dailyStats['Study']!, title: 'Study\n${_dailyStats['Study']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                            if (_dailyStats['Sleep']! > 0) PieChartSectionData(color: Colors.indigo, value: _dailyStats['Sleep']!, title: 'Sleep\n${_dailyStats['Sleep']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                            if (_dailyStats['Leisure']! > 0) PieChartSectionData(color: Colors.green, value: _dailyStats['Leisure']!, title: 'Leisure\n${_dailyStats['Leisure']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                          ],
+                    : SingleChildScrollView(
+                        child: Container(
+                          height: 280, 
+                          padding: const EdgeInsets.all(16.0),
+                          child: PieChart(
+                            PieChartData(
+                              sectionsSpace: 2, centerSpaceRadius: 40,
+                              sections: [
+                                if (_dailyStats['Study']! > 0) PieChartSectionData(color: Colors.blueGrey, value: _dailyStats['Study']!, title: 'Study\n${_dailyStats['Study']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                                if (_dailyStats['Sleep']! > 0) PieChartSectionData(color: Colors.indigo, value: _dailyStats['Sleep']!, title: 'Sleep\n${_dailyStats['Sleep']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                                if (_dailyStats['Leisure']! > 0) PieChartSectionData(color: Colors.green, value: _dailyStats['Leisure']!, title: 'Leisure\n${_dailyStats['Leisure']!.toStringAsFixed(1)}h', radius: 65, titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                       
+                // TAB 2: BAR CHART (THE STABLE VERSION)
                 Column(
                   children: [
                     Padding(
@@ -414,52 +436,61 @@ class _BalanceDashboardState extends State<BalanceDashboard> {
                       ),
                     ),
                     Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: max(MediaQuery.of(context).size.width - 32, _selectedTrendDays * 30.0),
-                            child: BarChart(
-                              BarChartData(
-                                alignment: BarChartAlignment.spaceAround, maxY: 24, 
-                                // --- FORMATIVE EVALUATION UPDATE: INTERACTIVE TOOLTIPS ---
-                                // Fulfills Nielsen's 'Flexibility and Efficiency of Use' heuristic.
-                                barTouchData: BarTouchData(
-                                  enabled: true,
-                                  touchTooltipData: BarTouchTooltipData(
-                                    getTooltipColor: (group) => Colors.teal.shade900,
-                                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                                      return BarTooltipItem('${rod.toY.toStringAsFixed(1)} Hours', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
-                                    },
-                                  ),
-                                ),
-                                titlesData: FlTitlesData(
-                                  show: true,
-                                  leftTitles: AxisTitles(
-                                    axisNameWidget: const Padding(padding: EdgeInsets.only(bottom: 4.0), child: Text('Hours', style: TextStyle(fontSize: 12, color: Colors.teal, fontWeight: FontWeight.bold))),
-                                    axisNameSize: 20,
-                                    sideTitles: SideTitles(showTitles: true, reservedSize: 28),
-                                  ),
-                                  bottomTitles: AxisTitles(
-                                    sideTitles: SideTitles(
-                                      showTitles: true,
-                                      getTitlesWidget: (value, meta) {
-                                        DateTime activeDate = _selectedDay ?? DateTime.now();
-                                        DateTime day = activeDate.subtract(Duration(days: (_selectedTrendDays - 1) - value.toInt()));
-                                        String label = _selectedTrendDays <= 14 ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day.weekday - 1] : '${day.month}/${day.day}';
-                                        return Padding(padding: const EdgeInsets.only(top: 8.0), child: Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54)));
-                                      },
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            Container(
+                              height: 300, 
+                              padding: const EdgeInsets.only(right: 24),
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  width: max(MediaQuery.of(context).size.width, _selectedTrendDays * 45.0),
+                                  child: BarChart(
+                                    BarChartData(
+                                      alignment: BarChartAlignment.spaceAround, 
+                                      maxY: 24.0, 
+                                      barTouchData: BarTouchData(enabled: true),
+                                      titlesData: FlTitlesData(
+                                        show: true,
+                                        leftTitles: AxisTitles(
+                                          sideTitles: SideTitles(
+                                            showTitles: true, 
+                                            reservedSize: 40,
+                                            getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                                          ),
+                                        ),
+                                        bottomTitles: AxisTitles(
+                                          sideTitles: SideTitles(
+                                            showTitles: true,
+                                            reservedSize: 32,
+                                            getTitlesWidget: (value, meta) {
+                                              DateTime activeDate = _selectedDay ?? DateTime.now();
+                                              DateTime day = activeDate.subtract(Duration(days: (_selectedTrendDays - 1) - value.toInt()));
+                                              String label = _selectedTrendDays <= 7 
+                                                ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day.weekday - 1] 
+                                                : '${day.day}/${day.month}';
+                                              
+                                              return Padding(
+                                                padding: const EdgeInsets.only(top: 8.0),
+                                                child: Text(label, style: const TextStyle(fontSize: 9, color: Colors.black87, fontWeight: FontWeight.bold)),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                      ),
+                                      gridData: const FlGridData(show: false),
+                                      borderData: FlBorderData(show: false),
+                                      barGroups: _buildTrendBarGroups(),
                                     ),
                                   ),
-                                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                                 ),
-                                gridData: const FlGridData(show: false), borderData: FlBorderData(show: false),
-                                barGroups: _buildTrendBarGroups(),
                               ),
                             ),
-                          ),
+                            const SizedBox(height: 80), 
+                          ],
                         ),
                       ),
                     ),
